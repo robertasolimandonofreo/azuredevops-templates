@@ -5,7 +5,7 @@ steps:
     inputs:
       script: |
         set -e
-        aws eks update-kubeconfig --region us-east-1 --name CLUSTER_NAME --profile AWS_PROFILE
+        aws eks update-kubeconfig --region $(region) --name ${{ parameters.env }} --profile ${{ parameters.env }}
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
 
   - task: CmdLine@2
@@ -13,10 +13,10 @@ steps:
     inputs:
       script: |
         set -e
-        aws eks update-kubeconfig --region us-east-1 --name CLUSTER_NAME --profile AWS_PROFILE
+        aws eks update-kubeconfig --region $(region) --name ${{ parameters.env }} --profile ${{ parameters.env }}
         cd cd/${{ parameters.env }}
         new_image=$(subs_id).dkr.ecr.$(region).amazonaws.com/$(appname)-${{ parameters.env }}:$(Build.BuildId)
-        echo "new_image=$new_image"
+        echo "##[section]Deploying image: $new_image"
         sed -i "s|image: .*|image: ${new_image}|" deployment.yaml
         cat deployment.yaml
         kubectl apply -f deployment.yaml
@@ -30,6 +30,6 @@ steps:
         else
           target_branch="stage"
         fi
-        echo "Target branch: $target_branch"
+        echo "##[section]Pushing to branch: $target_branch"
         git push origin HEAD:$target_branch
-      workingDirectory: "$(Build.Repository.LocalPath)"
+      workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"

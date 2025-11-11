@@ -1,13 +1,11 @@
 steps:
   - task: NodeTool@0
-    continueOnError: true
     displayName: configure sonarqube
     inputs:
       versionSpec: 20
 
   - task: CmdLine@2
     displayName: sast
-    continueOnError: true
     inputs:
       script: |
         trivy clean --all
@@ -18,7 +16,6 @@ steps:
 
   - task: CmdLine@2
     displayName: unit tests
-    continueOnError: true
     condition: eq(variables.testun, 'yes')
     inputs:
       script: |
@@ -51,9 +48,14 @@ steps:
 
   - task: CmdLine@2
     displayName: sonarqube
-    continueOnError: true
     inputs:
       script: |
+        set -e
+        if [ -z "$(SONAR_HOST_URL)" ] || [ -z "$(SONAR_TOKEN)" ]; then
+          echo "##[warning]SonarQube credentials not configured"
+          exit 0
+        fi
+        
         export PATH="$PATH:/opt/sonar-scanner/bin"
         
         if [ "$(testun)" == "yes" ] && [ "$(language)" == "go" ]; then

@@ -9,12 +9,9 @@ steps:
         aws configure set default.region $(AWS_REGION_${{ parameters.env }})
         subs_id=$(aws sts get-caller-identity --query 'Account' --output text)
         region=$(AWS_REGION_${{ parameters.env }})
-        echo "Authenticated in ${{ parameters.env }}"
         echo "##vso[task.setvariable variable=env]${{ parameters.env }}"
         echo "##vso[task.setvariable variable=subs_id]$subs_id"
         echo "##vso[task.setvariable variable=region]$region"
-        aws s3 ls
-        echo $subs_id
-        echo $region
-        echo $env
+        aws s3 ls > /dev/null
+        echo "##[section]Authenticated successfully in ${{ parameters.env }}"
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"

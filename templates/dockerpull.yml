@@ -12,6 +12,7 @@ steps:
         aws ecr get-login-password --region $region | docker login --username AWS --password-stdin $subs_id.dkr.ecr.$region.amazonaws.com
         images=$(echo "$(image)" | tr ',' ' ')
         for img in $images; do
+          echo "##[section]Pulling image: $img"
           docker pull $subs_id.dkr.ecr.$region.amazonaws.com/$img
         done
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
