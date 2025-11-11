@@ -1,0 +1,42 @@
+stages:
+  - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
+    - stage: prod
+      pool: agentpool
+      displayName: 'prod'
+      jobs:
+      - job: 'prod'
+        workspace:
+          clean: all 
+        displayName: "prod"
+        steps:
+          - checkout: self
+            persistCredentials: true
+          - template: templates/sonar.yml
+          - template: templates/cloudlogin.yml
+            parameters:
+              env: prod
+          - template: templates/cloudfront.yml
+            parameters:
+              env: prod
+          - template: clean.yml
+
+  - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/stage') }}:
+    - stage: stage
+      pool: agentpool
+      displayName: 'stage'
+      jobs:
+      - job: 'stage'
+        workspace:
+          clean: all 
+        displayName: stage
+        steps:
+          - checkout: self
+            persistCredentials: true
+          - template: templates/sonar.yml
+          - template: templates/cloudlogin.yml
+            parameters:
+              env: stage
+          - template: templates/cloudfront.yml
+            parameters:
+              env: stage
+          - template: clean.yml

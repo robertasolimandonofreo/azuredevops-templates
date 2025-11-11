@@ -1,0 +1,12 @@
+steps:
+  - task: CmdLine@2
+    displayName: clean
+    inputs:
+      script: |
+        docker system prune --all --volumes -f
+      condition: always()
+
+  - task: DeleteFiles@1
+    displayName: 'delete files from $(Agent.WorkFolder)'
+    inputs:
+      SourceFolder: '$(Agent.WorkFolder)'

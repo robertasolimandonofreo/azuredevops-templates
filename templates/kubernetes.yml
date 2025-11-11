@@ -1,0 +1,35 @@
+steps:
+
+  - task: CmdLine@2
+    displayName: configure kubeconfig
+    inputs:
+      script: |
+        set -e
+        aws eks update-kubeconfig --region us-east-1 --name CLUSTER_NAME --profile AWS_PROFILE
+      workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
+
+  - task: CmdLine@2
+    displayName: deploy
+    inputs:
+      script: |
+        set -e
+        aws eks update-kubeconfig --region us-east-1 --name CLUSTER_NAME --profile AWS_PROFILE
+        cd cd/${{ parameters.env }}
+        new_image=$(subs_id).dkr.ecr.$(region).amazonaws.com/$(appname)-${{ parameters.env }}:$(Build.BuildId)
+        echo "new_image=$new_image"
+        sed -i "s|image: .*|image: ${new_image}|" deployment.yaml
+        cat deployment.yaml
+        kubectl apply -f deployment.yaml
+        author=$(git log -1 --pretty=format:'%ae')
+        git config --global user.name "$author"
+        git config --global user.email "$author"
+        git add .
+        git commit -m "v$(Build.BuildNumber)"
+        if [ "${{ parameters.env }}" = "prod" ]; then
+          target_branch="main"
+        else
+          target_branch="stage"
+        fi
+        echo "Target branch: $target_branch"
+        git push origin HEAD:$target_branch
+      workingDirectory: "$(Build.Repository.LocalPath)"

@@ -1,0 +1,17 @@
+steps:
+  - task: CmdLine@2
+    displayName: docker pull
+    inputs:
+      script: |
+        set -e
+        aws configure set aws_access_key_id $(AWS_ACCESS_KEY_ID_prod)
+        aws configure set aws_secret_access_key $(AWS_SECRET_ACCESS_KEY_prod)
+        aws configure set default.region $(AWS_REGION_prod)
+        subs_id=$(aws sts get-caller-identity --query 'Account' --output text)
+        region=$(AWS_REGION_prod)
+        aws ecr get-login-password --region $region | docker login --username AWS --password-stdin $subs_id.dkr.ecr.$region.amazonaws.com
+        images=$(echo "$(image)" | tr ',' ' ')
+        for img in $images; do
+          docker pull $subs_id.dkr.ecr.$region.amazonaws.com/$img
+        done
+      workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"

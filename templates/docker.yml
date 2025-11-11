@@ -1,0 +1,14 @@
+steps:
+  - task: CmdLine@2
+    displayName: docker build & push
+    inputs:
+      script: |
+        set -e
+        docker build -f $(Dockerfile) -t $(appname):$(Build.BuildId) .
+        docker tag $(appname):$(Build.BuildId) $(subs_id).dkr.ecr.$(region).amazonaws.com/$(appname)-${{ parameters.env }}:$(Build.BuildId)
+        aws ecr get-login-password --region $(region) | docker login --username AWS --password-stdin $(subs_id).dkr.ecr.$(region).amazonaws.com
+        if ! aws ecr describe-repositories --repository-names "$(appname)-${{ parameters.env }}" >/dev/null 2>&1; then
+          aws ecr create-repository --repository-name  $(appname)-${{ parameters.env }} --image-scanning-configuration scanOnPush=true
+        fi
+        docker push $(subs_id).dkr.ecr.$(region).amazonaws.com/$(appname)-${{ parameters.env }}:$(Build.BuildId)
+      workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"

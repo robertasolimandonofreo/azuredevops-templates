@@ -1,0 +1,34 @@
+steps:
+
+  - task: NodeTool@0
+    continueOnError: true
+    displayName: configure node
+    inputs:
+      versionSpec: $(version)
+
+  - task: CmdLine@2
+    displayName: install & build
+    inputs:
+      script: |
+        npm lint
+        npm install
+        npm run build
+      workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
+
+  - task: CmdLine@2
+    displayName: deploy
+    inputs:
+      script: |
+        if [ "$(appname)" == "test-prod" ] && [ "${{ parameters.env }}" == "prod" ]; then
+          aws s3 sync dist/ s3:// --delete
+          aws cloudfront create-invalidation --distribution-id --paths "/*"
+        elif [ "$(appname)" == "test-stage" ] && [ "${{ parameters.env }}" == "stage" ]; then
+          aws s3 sync dist/ s3:// --delete
+          aws cloudfront create-invalidation --distribution-id --paths "/*"
+        elif [ "$(appname)" == "test-dev" ] && [ "${{ parameters.env }}" == "stage" ]; then
+          aws s3 sync dist/ s3:// --delete
+          aws cloudfront create-invalidation --distribution-id --paths "/*"
+        else
+          echo "No deploy for $(appname) in ${{ parameters.env }}"
+        fi
+      workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
