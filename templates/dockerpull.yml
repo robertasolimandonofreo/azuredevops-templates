@@ -1,18 +1,38 @@
+parameters:
+  - name: env
+    type: string
+
 steps:
   - task: CmdLine@2
     displayName: docker pull
     inputs:
       script: |
         set -e
-        aws configure set aws_access_key_id $(AWS_ACCESS_KEY_ID_prod)
-        aws configure set aws_secret_access_key $(AWS_SECRET_ACCESS_KEY_prod)
-        aws configure set default.region $(AWS_REGION_prod)
+
+        # Configure AWS credentials for the specified environment
+        echo "##[section]Configuring AWS credentials for ${{ parameters.env }}..."
+        aws configure set aws_access_key_id $(AWS_ACCESS_KEY_ID_${{ parameters.env }})
+        aws configure set aws_secret_access_key $(AWS_SECRET_ACCESS_KEY_${{ parameters.env }})
+        aws configure set default.region $(AWS_REGION_${{ parameters.env }})
+
+        # Get account ID and region
         subs_id=$(aws sts get-caller-identity --query 'Account' --output text)
-        region=$(AWS_REGION_prod)
+        region=$(AWS_REGION_${{ parameters.env }})
+
+        echo "##[section]Logging in to ECR in region $region..."
         aws ecr get-login-password --region $region | docker login --username AWS --password-stdin $subs_id.dkr.ecr.$region.amazonaws.com
+
+        # Pull images
+        if [ -z "$(image)" ]; then
+          echo "##[warning]No images specified to pull"
+          exit 0
+        fi
+
         images=$(echo "$(image)" | tr ',' ' ')
         for img in $images; do
           echo "##[section]Pulling image: $img"
           docker pull $subs_id.dkr.ecr.$region.amazonaws.com/$img
         done
+
+        echo "##[section]All images pulled successfully!"
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"

@@ -1,14 +1,45 @@
+parameters:
+  - name: env
+    type: string
+
 steps:
   - task: CmdLine@2
     displayName: docker build & push
     inputs:
       script: |
         set -e
-        docker build -f $(Dockerfile) -t $(appname):$(Build.BuildId) .
-        docker tag $(appname):$(Build.BuildId) $(subs_id).dkr.ecr.$(region).amazonaws.com/$(appname)-${{ parameters.env }}:$(Build.BuildId)
-        aws ecr get-login-password --region $(region) | docker login --username AWS --password-stdin $(subs_id).dkr.ecr.$(region).amazonaws.com
-        if ! aws ecr describe-repositories --repository-names "$(appname)-${{ parameters.env }}" >/dev/null 2>&1; then
-          aws ecr create-repository --repository-name  $(appname)-${{ parameters.env }} --image-scanning-configuration scanOnPush=true
+
+        # Verify Dockerfile exists
+        if [ ! -f "$(Dockerfile)" ]; then
+          echo "##[error]Dockerfile not found at path: $(Dockerfile)"
+          exit 1
         fi
-        docker push $(subs_id).dkr.ecr.$(region).amazonaws.com/$(appname)-${{ parameters.env }}:$(Build.BuildId)
+
+        # Build Docker image
+        echo "##[section]Building Docker image..."
+        docker build -f $(Dockerfile) -t $(appname):$(Build.BuildId) .
+
+        # Tag image for ECR
+        ecr_repo=$(subs_id).dkr.ecr.$(region).amazonaws.com/$(appname)-${{ parameters.env }}
+        echo "##[section]Tagging image for ECR: $ecr_repo:$(Build.BuildId)"
+        docker tag $(appname):$(Build.BuildId) $ecr_repo:$(Build.BuildId)
+        docker tag $(appname):$(Build.BuildId) $ecr_repo:latest
+
+        # Login to ECR
+        echo "##[section]Logging in to ECR..."
+        aws ecr get-login-password --region $(region) | docker login --username AWS --password-stdin $(subs_id).dkr.ecr.$(region).amazonaws.com
+
+        # Create ECR repository if it doesn't exist
+        if ! aws ecr describe-repositories --repository-names "$(appname)-${{ parameters.env }}" >/dev/null 2>&1; then
+          echo "##[section]Creating ECR repository: $(appname)-${{ parameters.env }}"
+          aws ecr create-repository --repository-name $(appname)-${{ parameters.env }} --image-scanning-configuration scanOnPush=true
+        fi
+
+        # Push image to ECR
+        echo "##[section]Pushing image to ECR..."
+        docker push $ecr_repo:$(Build.BuildId)
+        docker push $ecr_repo:latest
+
+        echo "##[section]Docker build and push completed successfully!"
+        echo "Image: $ecr_repo:$(Build.BuildId)"
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"

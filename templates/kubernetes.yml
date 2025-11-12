@@ -5,7 +5,9 @@ steps:
     inputs:
       script: |
         set -e
+        echo "##[section]Configuring kubeconfig for ${{ parameters.env }}..."
         aws eks update-kubeconfig --region $(region) --name ${{ parameters.env }} --profile ${{ parameters.env }}
+        echo "##[section]Kubeconfig configured successfully"
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
 
   - task: CmdLine@2
@@ -13,23 +15,57 @@ steps:
     inputs:
       script: |
         set -e
-        aws eks update-kubeconfig --region $(region) --name ${{ parameters.env }} --profile ${{ parameters.env }}
+
+        # Verify deployment directory exists
+        if [ ! -d "cd/${{ parameters.env }}" ]; then
+          echo "##[error]Deployment directory 'cd/${{ parameters.env }}' not found"
+          exit 1
+        fi
+
         cd cd/${{ parameters.env }}
+
+        # Verify deployment.yaml exists
+        if [ ! -f "deployment.yaml" ]; then
+          echo "##[error]deployment.yaml not found in cd/${{ parameters.env }}"
+          exit 1
+        fi
+
+        # Update image in deployment
         new_image=$(subs_id).dkr.ecr.$(region).amazonaws.com/$(appname)-${{ parameters.env }}:$(Build.BuildId)
         echo "##[section]Deploying image: $new_image"
         sed -i "s|image: .*|image: ${new_image}|" deployment.yaml
+
+        echo "##[section]Deployment manifest:"
         cat deployment.yaml
+
+        # Apply deployment
+        echo "##[section]Applying Kubernetes deployment..."
         kubectl apply -f deployment.yaml
+
+        # Wait for rollout
+        echo "##[section]Waiting for rollout to complete..."
+        kubectl rollout status deployment/$(appname) || kubectl rollout status deployment/$(appname)-${{ parameters.env }}
+
+        # Commit and push changes
         author=$(git log -1 --pretty=format:'%ae')
         git config --global user.name "$author"
         git config --global user.email "$author"
         git add .
-        git commit -m "v$(Build.BuildNumber)"
-        if [ "${{ parameters.env }}" = "prod" ]; then
-          target_branch="main"
+
+        if git diff --staged --quiet; then
+          echo "##[section]No changes to commit"
         else
-          target_branch="stage"
+          git commit -m "chore(deployment): update ${{ parameters.env }} to v$(Build.BuildNumber)"
+
+          if [ "${{ parameters.env }}" = "prod" ]; then
+            target_branch="main"
+          else
+            target_branch="stage"
+          fi
+
+          echo "##[section]Pushing to branch: $target_branch"
+          git push origin HEAD:$target_branch
         fi
-        echo "##[section]Pushing to branch: $target_branch"
-        git push origin HEAD:$target_branch
+
+        echo "##[section]Deployment completed successfully!"
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"

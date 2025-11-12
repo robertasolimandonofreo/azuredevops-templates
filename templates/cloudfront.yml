@@ -10,8 +10,12 @@ steps:
     displayName: install & build
     inputs:
       script: |
-        npm lint
+        set -e
+        echo "##[section]Installing dependencies..."
         npm install
+        echo "##[section]Running linter..."
+        npm run lint
+        echo "##[section]Building application..."
         npm run build
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
 
@@ -19,16 +23,46 @@ steps:
     displayName: deploy
     inputs:
       script: |
-        if [ "$(appname)" == "test-prod" ] && [ "${{ parameters.env }}" == "prod" ]; then
-          aws s3 sync dist/ s3:// --delete
-          aws cloudfront create-invalidation --distribution-id --paths "/*"
-        elif [ "$(appname)" == "test-stage" ] && [ "${{ parameters.env }}" == "stage" ]; then
-          aws s3 sync dist/ s3:// --delete
-          aws cloudfront create-invalidation --distribution-id --paths "/*"
-        elif [ "$(appname)" == "test-dev" ] && [ "${{ parameters.env }}" == "stage" ]; then
-          aws s3 sync dist/ s3:// --delete
-          aws cloudfront create-invalidation --distribution-id --paths "/*"
+        set -e
+
+        # Determine S3 bucket and CloudFront distribution based on environment
+        if [ "${{ parameters.env }}" == "prod" ]; then
+          S3_BUCKET="${S3_BUCKET_PROD:-}"
+          CF_DIST_ID="${CLOUDFRONT_DIST_PROD:-}"
+        elif [ "${{ parameters.env }}" == "stage" ]; then
+          S3_BUCKET="${S3_BUCKET_STAGE:-}"
+          CF_DIST_ID="${CLOUDFRONT_DIST_STAGE:-}"
         else
-          echo "No deploy for $(appname) in ${{ parameters.env }}"
+          echo "##[error]Unknown environment: ${{ parameters.env }}"
+          exit 1
+        fi
+
+        # Validate required variables
+        if [ -z "$S3_BUCKET" ]; then
+          echo "##[error]S3_BUCKET not configured for ${{ parameters.env }}"
+          exit 1
+        fi
+
+        if [ -z "$CF_DIST_ID" ]; then
+          echo "##[warning]CloudFront distribution ID not configured, skipping invalidation"
+        fi
+
+        # Verify build directory exists
+        if [ ! -d "dist" ]; then
+          echo "##[error]Build directory 'dist' not found"
+          exit 1
+        fi
+
+        # Deploy to S3
+        echo "##[section]Syncing to S3 bucket: $S3_BUCKET"
+        aws s3 sync dist/ s3://$S3_BUCKET --delete --exact-timestamps
+
+        # Invalidate CloudFront cache
+        if [ -n "$CF_DIST_ID" ]; then
+          echo "##[section]Invalidating CloudFront distribution: $CF_DIST_ID"
+          aws cloudfront create-invalidation --distribution-id $CF_DIST_ID --paths "/*"
+          echo "##[section]Deployment completed successfully!"
+        else
+          echo "##[section]Deployment to S3 completed successfully!"
         fi
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"

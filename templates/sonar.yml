@@ -8,10 +8,30 @@ steps:
     displayName: sast
     inputs:
       script: |
+        set -e
+        echo "##[section]Running SAST with Trivy..."
+
+        # Clean Trivy cache
+        echo "##[section]Cleaning Trivy cache..."
         trivy clean --all
-        trivy repo . --db-repository public.ecr.aws/aquasecurity/trivy-db --java-db-repository public.ecr.aws/aquasecurity/trivy-java-db --format json -o trivy.json
+
+        # Scan repository
+        echo "##[section]Scanning repository for vulnerabilities..."
+        trivy repo . \
+          --db-repository public.ecr.aws/aquasecurity/trivy-db \
+          --java-db-repository public.ecr.aws/aquasecurity/trivy-java-db \
+          --format json \
+          -o trivy.json
+
+        # Install SonarQube plugin
+        echo "##[section]Installing Trivy SonarQube plugin..."
         trivy plugin install github.com/umax/trivy-plugin-sonarqube@v0.2.2
+
+        # Convert to SonarQube format
+        echo "##[section]Converting scan results to SonarQube format..."
         trivy sonarqube trivy.json > sast.json
+
+        echo "##[section]SAST scan completed successfully!"
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
 
   - task: CmdLine@2
@@ -19,30 +39,54 @@ steps:
     condition: eq(variables.testun, 'yes')
     inputs:
       script: |
+        set -e
+
         if [ "$(language)" == "go" ]; then
-          wget https://go.dev/dl/go$(version).linux-amd64.tar.gz
+          echo "##[section]Setting up Go environment..."
+          wget -q https://go.dev/dl/go$(version).linux-amd64.tar.gz
           sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go$(version).linux-amd64.tar.gz
           export PATH=$PATH:/usr/local/go/bin
           go version
           rm -rf go$(version).linux-amd64.tar.gz
           export PATH=$PATH:$(go env GOPATH)/bin
-          set -e
+
+          echo "##[section]Installing test tools..."
           make setup-tools
+
+          echo "##[section]Running unit tests with coverage..."
           make test-coverage
-          make test-report
+
+          echo "##[section]Generating coverage reports..."
+          make coverage-report
+
+          echo "##[section]Go tests completed successfully!"
 
         elif [ "$(language)" == "node" ]; then
+          echo "##[section]Setting up Node.js environment..."
           curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.40.1/install.sh | bash
           source ~/.nvm/nvm.sh
           nvm install $(version)
           node --version
+          npm --version
+
+          echo "##[section]Installing dependencies..."
           npm install
+
+          echo "##[section]Building application..."
           npm run build
+
+          echo "##[section]Running unit tests..."
           mkdir -p coverage
-          set -e
           npm run test:unit
+
+          echo "##[section]Generating coverage reports..."
           npm run test:coverage
           cp coverage/cobertura-coverage.xml coverage/coverage-report.xml
+
+          echo "##[section]Node.js tests completed successfully!"
+        else
+          echo "##[error]Unsupported language: $(language)"
+          exit 1
         fi
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
 
@@ -51,41 +95,47 @@ steps:
     inputs:
       script: |
         set -e
+
+        # Check if SonarQube is configured
         if [ -z "$(SONAR_HOST_URL)" ] || [ -z "$(SONAR_TOKEN)" ]; then
-          echo "##[warning]SonarQube credentials not configured"
+          echo "##[warning]SonarQube credentials not configured, skipping analysis"
           exit 0
         fi
-        
+
+        echo "##[section]Running SonarQube analysis..."
         export PATH="$PATH:/opt/sonar-scanner/bin"
-        
-        if [ "$(testun)" == "yes" ] && [ "$(language)" == "go" ]; then
-          sonar-scanner -Dsonar.projectKey=$(appname) \
-              -Dsonar.sources=. \
-              -Dsonar.projectVersion="$(Build.buildNumber)" \
-              -Dsonar.host.url=$(SONAR_HOST_URL) \
-              -Dsonar.login=$(SONAR_TOKEN) \
-              -Dsonar.externalIssuesReportPaths="sast.json" \
-              -Dsonar.go.tests.reportPaths="coverage/sonar-report.json" \
-              -Dsonar.go.coverage.reportPaths="coverage/coverage.out" \
-              -Dsonar.tests=. \
-              -Dsonar.test.inclusions=**/**_test.go \
-              -Dsonar.branch.name=$(Build.SourceBranchName)
-              
-        elif [ "$(testun)" == "yes" ] && [ "$(language)" == "node" ]; then
-          sonar-scanner -Dsonar.projectKey=$(appname) \
-            -Dsonar.sources=. \
-            -Dsonar.projectVersion="$(Build.buildNumber)" \
-            -Dsonar.host.url=$(SONAR_HOST_URL) \
-            -Dsonar.login=$(SONAR_TOKEN) \
-            -Dsonar.externalIssuesReportPaths="sast.json" \
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
-            -Dsonar.branch.name=$(Build.SourceBranchName)
-        else
-          sonar-scanner -Dsonar.projectKey=$(appname) \
-            -Dsonar.sources=. \
-            -Dsonar.projectVersion="$(Build.buildNumber)" \
-            -Dsonar.host.url=$(SONAR_HOST_URL) \
-            -Dsonar.login=$(SONAR_TOKEN) \
-            -Dsonar.externalIssuesReportPaths="sast.json"
+
+        # Common parameters
+        COMMON_PARAMS="-Dsonar.projectKey=$(appname) \
+          -Dsonar.sources=. \
+          -Dsonar.projectVersion=$(Build.buildNumber) \
+          -Dsonar.host.url=$(SONAR_HOST_URL) \
+          -Dsonar.login=$(SONAR_TOKEN) \
+          -Dsonar.branch.name=$(Build.SourceBranchName)"
+
+        # Add SAST report if it exists
+        if [ -f "sast.json" ]; then
+          COMMON_PARAMS="$COMMON_PARAMS -Dsonar.externalIssuesReportPaths=sast.json"
         fi
+
+        # Language-specific configuration
+        if [ "$(testun)" == "yes" ] && [ "$(language)" == "go" ]; then
+          echo "##[section]Analyzing Go project with test coverage..."
+          sonar-scanner $COMMON_PARAMS \
+            -Dsonar.go.tests.reportPaths=coverage/sonar-report.json \
+            -Dsonar.go.coverage.reportPaths=coverage/coverage.out \
+            -Dsonar.tests=. \
+            -Dsonar.test.inclusions=**/**_test.go
+
+        elif [ "$(testun)" == "yes" ] && [ "$(language)" == "node" ]; then
+          echo "##[section]Analyzing Node.js project with test coverage..."
+          sonar-scanner $COMMON_PARAMS \
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+        else
+          echo "##[section]Analyzing project without test coverage..."
+          sonar-scanner $COMMON_PARAMS
+        fi
+
+        echo "##[section]SonarQube analysis completed successfully!"
       workingDirectory: "$(Build.Repository.LocalPath)/$(apppath)"
